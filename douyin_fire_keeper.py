@@ -285,15 +285,20 @@ def click_target_by_dom_text(page: Page, target_name: str) -> bool:
     return True
 
 
-def dump_debug_snapshot(page: Page, target_name: str) -> None:
-    safe_name = "".join(ch for ch in target_name if ch.isalnum()) or "target"
+def safe_file_part(value: str) -> str:
+    return "".join(ch for ch in value if ch.isalnum()) or "target"
+
+
+def dump_debug_snapshot(page: Page, target_name: str, label: str = "debug") -> None:
+    safe_name = safe_file_part(target_name)
+    safe_label = safe_file_part(label)
     try:
         text = page.locator("body").inner_text(timeout=3000)
     except Exception as exc:
         text = f"读取 body 文本失败: {exc}"
 
-    text_path = Path(f"debug-not-found-{safe_name}.txt")
-    png_path = Path(f"debug-not-found-{safe_name}.png")
+    text_path = Path(f"debug-{safe_label}-{safe_name}.txt")
+    png_path = Path(f"debug-{safe_label}-{safe_name}.png")
     text_path.write_text(text[:12000], encoding="utf-8")
     try:
         page.screenshot(path=str(png_path), full_page=True)
@@ -333,7 +338,7 @@ def click_target_friend(page: Page, target_name: str, config: Dict[str, Any]) ->
         time.sleep(pause)
 
     logging.error("没有在聊天列表中找到好友: %s", target_name)
-    dump_debug_snapshot(page, target_name)
+    dump_debug_snapshot(page, target_name, "not-found")
     return False
 
 
@@ -360,11 +365,79 @@ def find_chat_input(page: Page, timeout_ms: int) -> Optional[Locator]:
     return None
 
 
-def send_message(page: Page, message: str, config: Dict[str, Any], dry_run: bool) -> bool:
+def get_input_text(chat_input: Locator) -> str:
+    try:
+        return str(
+            chat_input.evaluate(
+                """(el) => {
+                    if ('value' in el) return el.value || '';
+                    return el.innerText || el.textContent || '';
+                }"""
+            )
+        )
+    except Exception:
+        return ""
+
+
+def fill_chat_input(page: Page, chat_input: Locator, message: str, timeout_ms: int) -> None:
+    chat_input.click(timeout=timeout_ms)
+    try:
+        tag_name = str(chat_input.evaluate("(el) => el.tagName")).lower()
+        is_editable = bool(chat_input.evaluate("(el) => el.isContentEditable"))
+    except Exception:
+        tag_name = ""
+        is_editable = False
+
+    if tag_name in {"textarea", "input"}:
+        chat_input.fill(message, timeout=timeout_ms)
+        return
+
+    page.keyboard.press("Control+A")
+    page.keyboard.press("Backspace")
+    page.keyboard.insert_text(message)
+    time.sleep(0.5)
+
+    if message not in get_input_text(chat_input):
+        chat_input.evaluate(
+            """(el, value) => {
+                if ('value' in el) {
+                    el.value = value;
+                } else if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
+                    el.innerText = value;
+                } else {
+                    el.textContent = value;
+                }
+                el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }""",
+            message,
+        )
+
+
+def wait_for_send_confirmation(page: Page, chat_input: Locator, message: str, timeout_ms: int = 12000) -> bool:
+    deadline = time.time() + timeout_ms / 1000
+    normalized_message = normalize_name(message)
+    while time.time() < deadline:
+        input_text = normalize_name(get_input_text(chat_input))
+        try:
+            body_text = normalize_name(page.locator("body").inner_text(timeout=1500))
+        except Exception:
+            body_text = ""
+
+        input_cleared = normalized_message not in input_text
+        message_visible = normalized_message in body_text
+        if input_cleared and message_visible:
+            return True
+        time.sleep(0.8)
+    return False
+
+
+def send_message(page: Page, target_name: str, message: str, config: Dict[str, Any], dry_run: bool) -> bool:
     timeout_ms = int(config.get("default_timeout_ms", 60000))
     chat_input = find_chat_input(page, timeout_ms)
     if chat_input is None:
         logging.error("没有找到聊天输入框。")
+        dump_debug_snapshot(page, target_name, "no-input")
         return False
 
     logging.info("准备发送消息: %s", message.replace("\n", "\\n"))
@@ -372,18 +445,34 @@ def send_message(page: Page, message: str, config: Dict[str, Any], dry_run: bool
         logging.info("dry-run 模式：不会真正发送。")
         return True
 
-    chat_input.click(timeout=timeout_ms)
-    page.keyboard.insert_text(message)
+    fill_chat_input(page, chat_input, message, timeout_ms)
     time.sleep(0.5)
+    input_text = get_input_text(chat_input)
+    if message not in input_text:
+        logging.error("输入框没有成功写入消息，停止发送。")
+        dump_debug_snapshot(page, target_name, "input-failed")
+        return False
 
     send_button = page.get_by_text("发送", exact=True)
+    clicked = False
     if click_if_visible(send_button, timeout_ms=2500):
         logging.info("已点击发送按钮。")
+        clicked = True
+    else:
+        page.keyboard.press("Enter")
+        logging.info("未找到发送按钮，已尝试按 Enter 发送。")
+
+    time.sleep(2)
+    dump_debug_snapshot(page, target_name, "after-send")
+    if wait_for_send_confirmation(page, chat_input, message):
+        logging.info("已确认消息出现在页面中。")
         return True
 
-    page.keyboard.press("Enter")
-    logging.info("未找到发送按钮，已尝试按 Enter 发送。")
-    return True
+    if clicked:
+        logging.error("已点击发送按钮，但未确认消息成功发送。")
+    else:
+        logging.error("已按 Enter，但未确认消息成功发送。")
+    return False
 
 
 def run_once(config_path: Path, force: bool, dry_run: bool) -> int:
@@ -429,7 +518,7 @@ def run_once(config_path: Path, force: bool, dry_run: bool) -> int:
                     continue
 
                 message = pick_message(config, target)
-                if send_message(page, message, config, dry_run):
+                if send_message(page, target_name, message, config, dry_run):
                     if not dry_run:
                         mark_sent(state_path, state, target_name)
                     time.sleep(1.5)
