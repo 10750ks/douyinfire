@@ -217,12 +217,101 @@ def scroll_chat_list(page: Page, pixels: int = 700) -> bool:
     )
 
 
+def normalize_name(value: str) -> str:
+    return "".join(str(value).split())
+
+
+def click_target_by_dom_text(page: Page, target_name: str) -> bool:
+    """Find visible text in the current creator-center list and click its row by coordinates."""
+    result = page.evaluate(
+        """(targetName) => {
+            const normalize = (value) => String(value || '').replace(/\\s+/g, '').trim();
+            const target = normalize(targetName);
+            const visible = (el) => {
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                return rect.width > 0 && rect.height > 0 &&
+                    style.visibility !== 'hidden' && style.display !== 'none' &&
+                    rect.bottom >= 0 && rect.top <= window.innerHeight;
+            };
+
+            const matches = Array.from(document.querySelectorAll('body *'))
+                .filter(visible)
+                .map((el) => {
+                    const text = normalize(el.innerText || el.textContent);
+                    return { el, text, rect: el.getBoundingClientRect() };
+                })
+                .filter((item) => item.text && item.text.includes(target))
+                .sort((a, b) => a.text.length - b.text.length);
+
+            if (!matches.length) {
+                return { found: false };
+            }
+
+            let textEl = matches[0].el;
+            let row = textEl;
+            for (let cur = textEl; cur && cur !== document.body; cur = cur.parentElement) {
+                const rect = cur.getBoundingClientRect();
+                if (rect.width >= 280 && rect.height >= 36 && rect.height <= 180) {
+                    row = cur;
+                }
+                if (rect.width >= window.innerWidth * 0.45 && rect.height >= 50 && rect.height <= 180) {
+                    row = cur;
+                    break;
+                }
+            }
+
+            const rect = row.getBoundingClientRect();
+            const textRect = textEl.getBoundingClientRect();
+            const x = Math.max(1, Math.min(window.innerWidth - 1, textRect.left + Math.min(30, textRect.width / 2)));
+            const y = Math.max(1, Math.min(window.innerHeight - 1, rect.top + rect.height / 2));
+            return {
+                found: true,
+                x,
+                y,
+                text: (textEl.innerText || textEl.textContent || '').slice(0, 120),
+                rowText: (row.innerText || row.textContent || '').slice(0, 200)
+            };
+        }""",
+        target_name,
+    )
+
+    if not result.get("found"):
+        return False
+
+    logging.info("DOM 扫描命中好友: %s", result.get("text", "").strip())
+    page.mouse.click(result["x"], result["y"])
+    time.sleep(1)
+    return True
+
+
+def dump_debug_snapshot(page: Page, target_name: str) -> None:
+    safe_name = "".join(ch for ch in target_name if ch.isalnum()) or "target"
+    try:
+        text = page.locator("body").inner_text(timeout=3000)
+    except Exception as exc:
+        text = f"读取 body 文本失败: {exc}"
+
+    text_path = Path(f"debug-not-found-{safe_name}.txt")
+    png_path = Path(f"debug-not-found-{safe_name}.png")
+    text_path.write_text(text[:12000], encoding="utf-8")
+    try:
+        page.screenshot(path=str(png_path), full_page=True)
+    except Exception as exc:
+        logging.warning("保存调试截图失败: %s", exc)
+    logging.info("已保存调试文件: %s / %s", text_path, png_path)
+
+
 def click_target_friend(page: Page, target_name: str, config: Dict[str, Any]) -> bool:
     scroll_limit = int(config.get("scroll_limit", 80))
     pause = int(config.get("scroll_pause_ms", 800)) / 1000
 
     logging.info("查找好友: %s", target_name)
     for index in range(scroll_limit):
+        if click_target_by_dom_text(page, target_name):
+            logging.info("已点击好友: %s", target_name)
+            return True
+
         exact_text = page.get_by_text(target_name, exact=True)
         if exact_text.count() > 0:
             candidate = exact_text.first
@@ -244,6 +333,7 @@ def click_target_friend(page: Page, target_name: str, config: Dict[str, Any]) ->
         time.sleep(pause)
 
     logging.error("没有在聊天列表中找到好友: %s", target_name)
+    dump_debug_snapshot(page, target_name)
     return False
 
 
