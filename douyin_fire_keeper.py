@@ -92,16 +92,19 @@ def sanitize_cookie(cookie: Dict[str, Any]) -> Dict[str, Any]:
 
     same_site = cleaned.get("sameSite")
     if isinstance(same_site, str):
+        normalized = same_site.strip().lower().replace("-", "_").replace(" ", "_")
         mapping = {
             "no_restriction": "None",
-            "unspecified": "Lax",
+            "unspecified": None,
             "lax": "Lax",
             "strict": "Strict",
             "none": "None",
         }
-        cleaned["sameSite"] = mapping.get(same_site.lower(), same_site)
+        cleaned["sameSite"] = mapping.get(normalized, same_site)
         if cleaned["sameSite"] not in {"Strict", "Lax", "None"}:
             cleaned.pop("sameSite", None)
+    else:
+        cleaned.pop("sameSite", None)
 
     allowed = {"name", "value", "domain", "path", "expires", "httpOnly", "secure", "sameSite"}
     for key in list(cleaned):
