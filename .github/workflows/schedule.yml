@@ -1,0 +1,40 @@
+name: DouYin Spark Flow Schedule Run
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "10 16 * * *" # UTC 16:10 = 北京时间 00:10
+jobs:
+  run-main:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Test Douyin Accessibility
+      run: |
+        curl -I https://creator.douyin.com/
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+    - name: Ensure browsers are installed
+      run: playwright install chromium --with-deps
+    - name: Run DouYin Spark Flow
+      run: python main.py
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: run-logs
+        path: |
+          logs/
+          debug-*.png
+          debug-*.txt
+  workflow-keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: liskin/gh-workflow-keepalive@v1
