@@ -5,12 +5,13 @@
     "影视",
     "诗词",
     "哲学",
-    "原创",
-    "游戏",
-    "漫画",
     "动画",
+    "漫画",
+    "游戏",
+    "原创",
     "来自网络",
-    "抖机灵"
+    "抖机灵",
+    "其他"
   ],
   "matchMode": "short_id",
   "groupMatchMode": "id",
@@ -283,7 +284,7 @@
         },
         {
           "domain": ".douyin.com",
-          "expirationDate": 1788463462.115013,
+          "expirationDate": 1788463477.47206,
           "hostOnly": false,
           "httpOnly": false,
           "name": "bd_ticket_guard_client_data",
@@ -309,7 +310,7 @@
         },
         {
           "domain": ".douyin.com",
-          "expirationDate": 1814815461.147634,
+          "expirationDate": 1814815476.873221,
           "hostOnly": false,
           "httpOnly": true,
           "name": "ttwid",
@@ -318,7 +319,7 @@
           "secure": true,
           "session": false,
           "storeId": null,
-          "value": "1%7CHm-gFjqPhc27S5pjbZeXw2J0Rz4lbQoBtNGpohlqfrY%7C1783279461%7Cbfe854bbcc1a4d22dcf19737d5717b49482b2678aa917db87e666751cafba227"
+          "value": "1%7CHm-gFjqPhc27S5pjbZeXw2J0Rz4lbQoBtNGpohlqfrY%7C1783279476%7Cbceb0088bf3bdfad3beefa2a0da17fd8f006613c3a6b9329cdf160d8dbb71cc4"
         },
         {
           "domain": ".douyin.com",
@@ -400,7 +401,7 @@
         },
         {
           "domain": ".douyin.com",
-          "expirationDate": 1788463462.115176,
+          "expirationDate": 1788463477.472187,
           "hostOnly": false,
           "httpOnly": false,
           "name": "bd_ticket_guard_client_web_domain",
@@ -463,7 +464,7 @@
         },
         {
           "domain": "creator.douyin.com",
-          "expirationDate": 1783884260.599619,
+          "expirationDate": 1783884276.376769,
           "hostOnly": true,
           "httpOnly": true,
           "name": "gd_random",
@@ -502,7 +503,7 @@
         },
         {
           "domain": ".douyin.com",
-          "expirationDate": 1814814950.28234,
+          "expirationDate": 1814815499.291841,
           "hostOnly": false,
           "httpOnly": true,
           "name": "odin_tt",
@@ -511,7 +512,7 @@
           "secure": false,
           "session": false,
           "storeId": null,
-          "value": "932dba45082a1c2e49bed77da8695aa743657b268d1b6e2156b7a2e9201e65560a078ba6756dcab233d4056a08f478d1"
+          "value": "5620c063b56dd41cc57915a93d8d7769c9ded899eb9d998f54065920316e9b6cc6953119b7965404b22e9544d1b59923"
         },
         {
           "domain": ".douyin.com",
@@ -644,8 +645,8 @@
         }
       ],
       "targets": [
-        "friend1",
-        "friend2"
+        "7666667z",
+        "364418446"
       ],
       "groups": []
     }
