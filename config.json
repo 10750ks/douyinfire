@@ -1,0 +1,21 @@
+{
+  "chat_url": "https://creator.douyin.com/creator-micro/data/following/chat",
+  "headless": true,
+  "default_timeout_ms": 60000,
+  "page_load_wait_ms": 5000,
+  "scroll_limit": 80,
+  "scroll_pause_ms": 800,
+  "send_once_per_day": false,
+  "cookies_file": "cookies.json",
+  "message_templates": [
+    "续火"
+  ],
+  "targets": [
+    {
+      "name": "好友昵称",
+      "message_templates": [
+        "续火"
+      ]
+    }
+  ]
+}
