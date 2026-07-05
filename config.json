@@ -1,0 +1,20 @@
+{
+  "messageTemplate": "续火",
+  "matchMode": "nickname",
+  "groupMatchMode": "name",
+  "browserTimeout": 120000,
+  "friendListTimeout": 2000,
+  "taskRetryTimes": 3,
+  "logLevel": "Debug",
+  "accounts": [
+    {
+      "username": "我的账号",
+      "unique_id": "default",
+      "cookies_file": "cookies.json",
+      "targets": [
+        "好友原始昵称"
+      ],
+      "groups": []
+    }
+  ]
+}

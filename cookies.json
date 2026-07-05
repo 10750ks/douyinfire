@@ -1,0 +1,8 @@
+[
+  {
+    "name": "这里放 Cookie 名称",
+    "value": "这里放 Cookie 值",
+    "domain": ".douyin.com",
+    "path": "/"
+  }
+]
