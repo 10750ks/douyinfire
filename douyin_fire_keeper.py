@@ -90,21 +90,9 @@ def sanitize_cookie(cookie: Dict[str, Any]) -> Dict[str, Any]:
     if "expirationDate" in cleaned and "expires" not in cleaned:
         cleaned["expires"] = cleaned["expirationDate"]
 
-    same_site = cleaned.get("sameSite")
-    if isinstance(same_site, str):
-        normalized = same_site.strip().lower().replace("-", "_").replace(" ", "_")
-        mapping = {
-            "no_restriction": "None",
-            "unspecified": None,
-            "lax": "Lax",
-            "strict": "Strict",
-            "none": "None",
-        }
-        cleaned["sameSite"] = mapping.get(normalized, same_site)
-        if cleaned["sameSite"] not in {"Strict", "Lax", "None"}:
-            cleaned.pop("sameSite", None)
-    else:
-        cleaned.pop("sameSite", None)
+    # Cookie-Editor exports sameSite in several browser-specific spellings.
+    # Dropping it is accepted by Playwright and matches DouYinSpark-ALL's approach.
+    cleaned.pop("sameSite", None)
 
     allowed = {"name", "value", "domain", "path", "expires", "httpOnly", "secure", "sameSite"}
     for key in list(cleaned):
@@ -188,6 +176,14 @@ def scroll_chat_list(page: Page, pixels: int = 700) -> bool:
     return bool(
         page.evaluate(
             """(pixels) => {
+                const preferred = document.querySelector('[class*="semi-list"]') ||
+                                  document.querySelector('#sub-app ul');
+                if (preferred && preferred.scrollHeight > preferred.clientHeight + 20) {
+                    const before = preferred.scrollTop;
+                    preferred.scrollTop = before + pixels;
+                    return preferred.scrollTop !== before;
+                }
+
                 const candidates = Array.from(document.querySelectorAll('*'))
                   .map(el => {
                     const rect = el.getBoundingClientRect();
@@ -219,6 +215,41 @@ def scroll_chat_list(page: Page, pixels: int = 700) -> bool:
 
 def normalize_name(value: str) -> str:
     return "".join(str(value).split())
+
+
+def click_chat_tab(page: Page, tab_name: str = "全部") -> None:
+    try:
+        tab = page.get_by_text(tab_name, exact=True)
+        if click_if_visible(tab, timeout_ms=2500):
+            logging.info("已切换到 %s 标签。", tab_name)
+            time.sleep(1)
+    except Exception:
+        pass
+
+
+def click_target_by_item_header(page: Page, target_name: str) -> bool:
+    found = page.evaluate(
+        """(targetName) => {
+            const normalize = (value) => String(value || '').replace(/\\s+/g, '').trim();
+            const target = normalize(targetName);
+            const spans = Array.from(document.querySelectorAll('[class*="item-header-name-"]'));
+            for (const span of spans) {
+                if (normalize(span.textContent).includes(target) && span.offsetParent !== null) {
+                    const rect = span.getBoundingClientRect();
+                    if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+                    span.click();
+                    return { text: span.textContent || '' };
+                }
+            }
+            return null;
+        }""",
+        target_name,
+    )
+    if found:
+        logging.info("item-header-name 命中好友: %s", str(found.get("text", "")).strip())
+        time.sleep(1)
+        return True
+    return False
 
 
 def click_target_by_dom_text(page: Page, target_name: str) -> bool:
@@ -312,7 +343,12 @@ def click_target_friend(page: Page, target_name: str, config: Dict[str, Any]) ->
     pause = int(config.get("scroll_pause_ms", 800)) / 1000
 
     logging.info("查找好友: %s", target_name)
+    click_chat_tab(page, str(config.get("chat_tab", "全部")))
     for index in range(scroll_limit):
+        if click_target_by_item_header(page, target_name):
+            logging.info("已点击好友: %s", target_name)
+            return True
+
         if click_target_by_dom_text(page, target_name):
             logging.info("已点击好友: %s", target_name)
             return True
@@ -414,6 +450,20 @@ def fill_chat_input(page: Page, chat_input: Locator, message: str, timeout_ms: i
         )
 
 
+def keyboard_type_and_enter(page: Page, chat_input: Locator, message: str, timeout_ms: int) -> None:
+    chat_input.click(timeout=timeout_ms)
+    page.keyboard.press("Control+A")
+    page.keyboard.press("Backspace")
+    lines = message.splitlines() or [message]
+    for index, line in enumerate(lines):
+        if line:
+            page.keyboard.insert_text(line)
+        if index != len(lines) - 1:
+            page.keyboard.press("Shift+Enter")
+    time.sleep(0.5)
+    page.keyboard.press("Enter")
+
+
 def wait_for_send_confirmation(page: Page, chat_input: Locator, message: str, timeout_ms: int = 12000) -> bool:
     deadline = time.time() + timeout_ms / 1000
     normalized_message = normalize_name(message)
@@ -445,8 +495,16 @@ def send_message(page: Page, target_name: str, message: str, config: Dict[str, A
         logging.info("dry-run 模式：不会真正发送。")
         return True
 
+    keyboard_type_and_enter(page, chat_input, message, timeout_ms)
+    logging.info("已尝试键盘 Enter 发送。")
+    time.sleep(2)
+    if wait_for_send_confirmation(page, chat_input, message):
+        dump_debug_snapshot(page, target_name, "after-enter-send")
+        logging.info("已确认消息出现在页面中。")
+        return True
+
+    logging.warning("键盘 Enter 未确认成功，尝试按钮兜底。")
     fill_chat_input(page, chat_input, message, timeout_ms)
-    time.sleep(0.5)
     input_text = get_input_text(chat_input)
     if message not in input_text:
         logging.error("输入框没有成功写入消息，停止发送。")
@@ -454,24 +512,20 @@ def send_message(page: Page, target_name: str, message: str, config: Dict[str, A
         return False
 
     send_button = page.get_by_text("发送", exact=True)
-    clicked = False
     if click_if_visible(send_button, timeout_ms=2500):
         logging.info("已点击发送按钮。")
-        clicked = True
     else:
-        page.keyboard.press("Enter")
-        logging.info("未找到发送按钮，已尝试按 Enter 发送。")
+        logging.error("没有找到发送按钮，且 Enter 发送未确认成功。")
+        dump_debug_snapshot(page, target_name, "no-send-button")
+        return False
 
     time.sleep(2)
-    dump_debug_snapshot(page, target_name, "after-send")
+    dump_debug_snapshot(page, target_name, "after-button-send")
     if wait_for_send_confirmation(page, chat_input, message):
         logging.info("已确认消息出现在页面中。")
         return True
 
-    if clicked:
-        logging.error("已点击发送按钮，但未确认消息成功发送。")
-    else:
-        logging.error("已按 Enter，但未确认消息成功发送。")
+    logging.error("已尝试 Enter 和发送按钮，但未确认消息成功发送。")
     return False
 
 
