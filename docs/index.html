@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DouYinSparkFlow 配置生成器</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+      color: #1f2937;
+      background: #f4f6f8;
+    }
+    button, input, textarea, select { font: inherit; }
+    .page {
+      width: min(1280px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 40px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+    }
+    .hint {
+      margin: 6px 0 0;
+      color: #667085;
+      font-size: 13px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(360px, 1fr) minmax(380px, 520px);
+      gap: 18px;
+      align-items: start;
+    }
+    .panel {
+      background: #fff;
+      border: 1px solid #d9dee7;
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .panel + .panel { margin-top: 16px; }
+    .panel h2 {
+      margin: 0 0 16px;
+      font-size: 17px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      margin-bottom: 14px;
+    }
+    .field.full { grid-column: 1 / -1; }
+    label {
+      font-size: 13px;
+      font-weight: 700;
+      color: #344054;
+    }
+    input, textarea, select {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid #cfd6e1;
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: #101828;
+      background: #fff;
+      outline: none;
+    }
+    textarea {
+      min-height: 86px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: #2f6feb;
+      box-shadow: 0 0 0 3px rgba(47, 111, 235, .12);
+    }
+    .check-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+    }
+    .check-row label, .switch-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 400;
+      color: #344054;
+    }
+    .check-row input, .switch-row input {
+      width: auto;
+      min-height: auto;
+    }
+    .switch-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .account {
+      border: 1px solid #e1e6ef;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 14px;
+      background: #fbfcfe;
+    }
+    .account-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .account-title {
+      font-weight: 700;
+      color: #344054;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    button {
+      min-height: 38px;
+      border: 1px solid #cfd6e1;
+      border-radius: 6px;
+      padding: 8px 13px;
+      background: #fff;
+      color: #1f2937;
+      cursor: pointer;
+    }
+    button.primary {
+      border-color: #2f6feb;
+      background: #2f6feb;
+      color: #fff;
+      font-weight: 700;
+    }
+    button.danger {
+      border-color: #f1b8b8;
+      color: #b42318;
+    }
+    button:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+    .preview {
+      position: sticky;
+      top: 16px;
+    }
+    pre {
+      max-height: 70vh;
+      margin: 0;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: #101828;
+      color: #e6edf3;
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .status {
+      min-height: 20px;
+      margin-top: 10px;
+      color: #067647;
+      font-size: 13px;
+    }
+    .error { color: #b42318; }
+    .small {
+      color: #667085;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    @media (max-width: 920px) {
+      .layout { grid-template-columns: 1fr; }
+      .preview { position: static; }
+      .grid { grid-template-columns: 1fr; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="topbar">
+      <div>
+        <h1>DouYinSparkFlow 配置生成器</h1>
+        <p class="hint">这个页面是单文件版本，只上传 docs/index.html 也能使用。</p>
+      </div>
+      <button class="primary" id="copyTop">复制 CONFIG</button>
+    </div>
+
+    <div class="layout">
+      <section>
+        <div class="panel">
+          <h2>基础配置</h2>
+          <div class="field">
+            <label for="messageTemplate">消息模板</label>
+            <textarea id="messageTemplate">[API]</textarea>
+            <div class="small">保持默认 [API] 时，程序会按原逻辑获取一言内容。</div>
+          </div>
+
+          <div class="field">
+            <label>一言类型</label>
+            <div class="check-row" id="hitokotoTypes"></div>
+          </div>
+
+          <div class="grid">
+            <div class="field">
+              <label for="matchMode">账号匹配模式</label>
+              <select id="matchMode">
+                <option value="short_id">抖音号</option>
+                <option value="nickname">昵称</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="groupMatchMode">群聊匹配模式</label>
+              <select id="groupMatchMode">
+                <option value="name">群名称</option>
+                <option value="id">群 ID</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="browserTimeout">浏览器最长等待时间</label>
+              <input id="browserTimeout" type="number" min="5000" max="300000" step="1000" value="120000">
+            </div>
+            <div class="field">
+              <label for="friendListTimeout">好友列表等待时间</label>
+              <input id="friendListTimeout" type="number" min="1000" max="120000" step="1000" value="2000">
+            </div>
+            <div class="field">
+              <label for="taskRetryTimes">任务重试次数</label>
+              <input id="taskRetryTimes" type="number" min="1" max="5" step="1" value="3">
+            </div>
+            <div class="field">
+              <label for="logLevel">输出日志级别</label>
+              <select id="logLevel">
+                <option>Debug</option>
+                <option selected>Info</option>
+                <option>Warning</option>
+                <option>Error</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>异常通知</h2>
+          <div class="small" style="margin-bottom: 14px;">成功时不会推送，只有运行失败、Cookie 失效、找不到私信页等异常才推送。</div>
+          <div class="switch-row">
+            <label><input id="notifyEnabled" type="checkbox"> 启用异常通知</label>
+            <label><input id="wxpusherEnabled" type="checkbox"> WxPusher</label>
+            <label><input id="qqEmailEnabled" type="checkbox"> QQ 邮箱</label>
+            <label><input id="wecomEnabled" type="checkbox"> 企业微信机器人</label>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label for="wxpusherAppToken">WxPusher appToken</label>
+              <input id="wxpusherAppToken" placeholder="AT_xxx">
+            </div>
+            <div class="field">
+              <label for="wxpusherUids">WxPusher UID</label>
+              <input id="wxpusherUids" placeholder="多个 UID 用逗号分隔">
+            </div>
+            <div class="field">
+              <label for="qqEmailUsername">QQ 邮箱账号</label>
+              <input id="qqEmailUsername" placeholder="你的QQ邮箱@qq.com">
+            </div>
+            <div class="field">
+              <label for="qqEmailPassword">SMTP 授权码</label>
+              <input id="qqEmailPassword" type="password" placeholder="不是 QQ 密码">
+            </div>
+            <div class="field full">
+              <label for="qqEmailTo">接收邮箱</label>
+              <input id="qqEmailTo" placeholder="多个邮箱用逗号分隔">
+            </div>
+            <div class="field full">
+              <label for="wecomWebhook">企业微信 Webhook</label>
+              <input id="wecomWebhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx">
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>账户配置</h2>
+          <div id="accounts"></div>
+          <div class="actions">
+            <button class="primary" id="addAccount">添加账户</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel preview">
+        <h2>CONFIG 配置预览</h2>
+        <pre id="preview"></pre>
+        <div class="actions">
+          <button class="primary" id="copyConfig">一键复制 CONFIG</button>
+          <button id="downloadConfig">下载 config.json</button>
+        </div>
+        <div class="status" id="status"></div>
+      </aside>
+    </div>
+  </main>
+
+  <script>
+    const hitokotoOptions = ["动画", "漫画", "游戏", "文学", "原创", "来自网络", "影视", "诗词", "哲学", "抖机灵", "其他"];
+    const defaultHitokoto = new Set(["文学", "影视", "诗词", "哲学"]);
+    const accounts = [{
+      username: "user1",
+      unique_id: "12345678905",
+      cookies: "cookie1",
+      targets: "friend1, friend2",
+      groups: ""
+    }];
+
+    const $ = (id) => document.getElementById(id);
+
+    function splitList(value) {
+      return String(value || "")
+        .split(/[\n,，;；]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    function numberValue(id, fallback) {
+      const value = Number($(id).value);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function normalizeCookies(value) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        return text;
+      }
+    }
+
+    function collectConfig() {
+      const selectedTypes = [...document.querySelectorAll("input[name='hitokoto']:checked")].map((item) => item.value);
+      return {
+        messageTemplate: $("messageTemplate").value,
+        hitokotoTypes: selectedTypes,
+        matchMode: $("matchMode").value,
+        groupMatchMode: $("groupMatchMode").value,
+        browserTimeout: numberValue("browserTimeout", 120000),
+        friendListTimeout: numberValue("friendListTimeout", 2000),
+        taskRetryTimes: numberValue("taskRetryTimes", 3),
+        logLevel: $("logLevel").value,
+        notify: {
+          enabled: $("notifyEnabled").checked,
+          channels: {
+            wxpusher: {
+              enabled: $("wxpusherEnabled").checked,
+              appToken: $("wxpusherAppToken").value.trim(),
+              uids: splitList($("wxpusherUids").value)
+            },
+            qq_email: {
+              enabled: $("qqEmailEnabled").checked,
+              username: $("qqEmailUsername").value.trim(),
+              password: $("qqEmailPassword").value,
+              to: splitList($("qqEmailTo").value),
+              smtpHost: "smtp.qq.com",
+              smtpPort: 465
+            },
+            wecom: {
+              enabled: $("wecomEnabled").checked,
+              webhook: $("wecomWebhook").value.trim()
+            }
+          }
+        },
+        accounts: accounts.map((account) => ({
+          username: account.username.trim(),
+          unique_id: account.unique_id.trim(),
+          cookies: normalizeCookies(account.cookies),
+          targets: splitList(account.targets),
+          groups: splitList(account.groups)
+        }))
+      };
+    }
+
+    function renderPreview() {
+      $("preview").textContent = JSON.stringify(collectConfig(), null, 2);
+    }
+
+    function renderHitokotoTypes() {
+      $("hitokotoTypes").innerHTML = hitokotoOptions.map((name) => {
+        const checked = defaultHitokoto.has(name) ? "checked" : "";
+        return `<label><input type="checkbox" name="hitokoto" value="${name}" ${checked}> ${name}</label>`;
+      }).join("");
+    }
+
+    function renderAccounts() {
+      $("accounts").innerHTML = accounts.map((account, index) => `
+        <div class="account">
+          <div class="account-head">
+            <div class="account-title">账户 ${index + 1}</div>
+            <button class="danger" data-remove="${index}" ${accounts.length <= 1 ? "disabled" : ""}>移除</button>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label for="username-${index}">用户名</label>
+              <input id="username-${index}" data-account="${index}" data-key="username" value="${escapeAttr(account.username)}">
+            </div>
+            <div class="field">
+              <label for="unique-${index}">抖音号</label>
+              <input id="unique-${index}" data-account="${index}" data-key="unique_id" value="${escapeAttr(account.unique_id)}">
+            </div>
+            <div class="field full">
+              <label for="cookies-${index}">Cookies JSON</label>
+              <textarea id="cookies-${index}" data-account="${index}" data-key="cookies" placeholder="把 Cookie-Editor 导出的 JSON 粘贴到这里">${escapeHtml(account.cookies)}</textarea>
+            </div>
+            <div class="field">
+              <label for="targets-${index}">目标好友</label>
+              <textarea id="targets-${index}" data-account="${index}" data-key="targets" placeholder="抖音号或昵称，多个用逗号或换行分隔">${escapeHtml(account.targets)}</textarea>
+            </div>
+            <div class="field">
+              <label for="groups-${index}">目标群聊</label>
+              <textarea id="groups-${index}" data-account="${index}" data-key="groups" placeholder="群名称或群 ID，多个用逗号或换行分隔">${escapeHtml(account.groups)}</textarea>
+            </div>
+          </div>
+        </div>
+      `).join("");
+      renderPreview();
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value).replaceAll('"', "&quot;");
+    }
+
+    async function copyConfig() {
+      const text = $("preview").textContent;
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.style.position = "fixed";
+          textarea.style.left = "-9999px";
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          document.execCommand("copy");
+          textarea.remove();
+        }
+        setStatus("CONFIG 已复制到剪贴板");
+      } catch (error) {
+        setStatus("复制失败，请手动复制右侧 CONFIG。", true);
+      }
+    }
+
+    function downloadConfig() {
+      const blob = new Blob([$("preview").textContent], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "config.json";
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function setStatus(message, isError = false) {
+      $("status").textContent = message;
+      $("status").className = isError ? "status error" : "status";
+      window.clearTimeout(setStatus.timer);
+      setStatus.timer = window.setTimeout(() => $("status").textContent = "", 3500);
+    }
+
+    function bindEvents() {
+      document.body.addEventListener("input", (event) => {
+        const target = event.target;
+        if (target.dataset.account) {
+          accounts[Number(target.dataset.account)][target.dataset.key] = target.value;
+        }
+        renderPreview();
+      });
+      document.body.addEventListener("change", renderPreview);
+      document.body.addEventListener("click", (event) => {
+        const removeIndex = event.target.dataset.remove;
+        if (removeIndex !== undefined && accounts.length > 1) {
+          accounts.splice(Number(removeIndex), 1);
+          renderAccounts();
+        }
+      });
+      $("addAccount").addEventListener("click", () => {
+        accounts.push({ username: "", unique_id: "", cookies: "", targets: "", groups: "" });
+        renderAccounts();
+      });
+      $("copyTop").addEventListener("click", copyConfig);
+      $("copyConfig").addEventListener("click", copyConfig);
+      $("downloadConfig").addEventListener("click", downloadConfig);
+    }
+
+    renderHitokotoTypes();
+    renderAccounts();
+    bindEvents();
+  </script>
+</body>
+</html>
