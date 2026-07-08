@@ -6,8 +6,16 @@ from typing import Dict, Iterable, List
 import requests
 
 
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on", "启用", "是"}
+    return bool(value)
+
+
 def _enabled(section: Dict) -> bool:
-    return bool(section and section.get("enabled", False))
+    return bool(section and _truthy(section.get("enabled", False)))
 
 
 def _as_list(value) -> List[str]:
@@ -105,11 +113,16 @@ def send_qq_email(section: Dict, title: str, content: str) -> str:
 
 def notify_failure(config: Dict, title: str, lines: Iterable[str], logger) -> None:
     notify = config.get("notify", {}) or {}
+    channels = notify.get("channels", {}) or {}
+    status = {
+        name: _enabled(channels.get(name, {}) or {})
+        for name in ("wxpusher", "wecom", "qq_email")
+    }
+    logger.info(f"失败通知配置: enabled={_enabled(notify)}, channels={status}")
     if not _enabled(notify):
         logger.info("失败通知未启用，跳过推送")
         return
 
-    channels = notify.get("channels", {}) or {}
     content = build_failure_message(title, lines)
     handlers = [
         ("wxpusher", send_wxpusher),
@@ -125,7 +138,8 @@ def notify_failure(config: Dict, title: str, lines: Iterable[str], logger) -> No
         try:
             result = handler(section, title, content)
             logger.info(result)
-            sent_any = True
+            if "成功" in result:
+                sent_any = True
         except Exception as exc:
             logger.error(f"{name} 推送失败: {exc}")
 
