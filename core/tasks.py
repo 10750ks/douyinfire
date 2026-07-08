@@ -67,7 +67,7 @@ def _type_and_send(page, label, logger):
 
 def _match_target(mapping, target, mode):
     """纯函数：在映射中查找目标。返回 {"nickname": ..., "user_id": ...} 或 None。"""
-    target_text = str(target)
+    target_text = str(target).strip()
     target_id = _target_short_id(target_text)
     if mode == "short_id":
         return mapping.get(target_text) or (mapping.get(target_id) if target_id else None)
@@ -82,24 +82,48 @@ def _target_short_id(target):
     for sep in ["：", ":"]:
         if sep in text:
             return text.split(sep, 1)[1].strip()
-    return text if text.isdigit() else ""
+    return text
 
 
 def _record_user_mapping(item, mapping):
     if not isinstance(item, dict):
         return
     user = item.get("user") if isinstance(item.get("user"), dict) else {}
-    sid = (
+    ids = [
         user.get("ShortId")
-        or user.get("short_id")
-        or item.get("ShortId")
-        or item.get("short_id")
-        or item.get("shortId")
+        or user.get("short_id"),
+        user.get("shortId"),
+        user.get("unique_id"),
+        user.get("uniqueId"),
+        user.get("display_id"),
+        user.get("displayId"),
+        user.get("douyin_id"),
+        user.get("douyinId"),
+        item.get("ShortId") or item.get("short_id"),
+        item.get("shortId"),
+        item.get("unique_id"),
+        item.get("uniqueId"),
+        item.get("display_id"),
+        item.get("displayId"),
+        item.get("douyin_id"),
+        item.get("douyinId"),
+    ]
+    nick = (
+        user.get("nickname")
+        or user.get("nick_name")
+        or user.get("remark_name")
+        or user.get("display_name")
+        or item.get("nickname")
+        or item.get("nick_name")
+        or item.get("remark_name")
+        or item.get("display_name")
     )
-    nick = user.get("nickname") or item.get("nickname") or item.get("nick_name")
     uid = item.get("user_id") or item.get("uid") or user.get("uid") or user.get("user_id") or ""
-    if sid and nick:
-        mapping[str(sid)] = {"nickname": str(nick), "user_id": str(uid)}
+    if nick:
+        for sid in ids:
+            sid_text = str(sid or "").strip()
+            if sid_text:
+                mapping[sid_text] = {"nickname": str(nick), "user_id": str(uid)}
 
 
 def _walk_json_for_users(obj, mapping):
@@ -134,6 +158,12 @@ def scroll_and_find(page, mapping, logger):
     page.on("response", on_resp)
 
     try:
+        page.reload(wait_until="domcontentloaded", timeout=config.get("browserTimeout", 120000))
+        page.wait_for_timeout(3000)
+    except Exception as e:
+        logger.debug(f"刷新私信页以重新收集好友信息失败，继续当前页面: {e}")
+
+    try:
         if page.get_by_text("朋友私信", exact=True).count() > 0:
             page.get_by_text("朋友私信", exact=True).click(timeout=5000)
             logger.debug("已点击朋友私信 tab")
@@ -158,9 +188,11 @@ def try_click_and_send(page, target, mapping, logger):
     if not info:
         if matchMode == "short_id":
             logger.warning(f"映射中未找到目标抖音号: {target}")
-            return False
-        nickname = str(target)
-        logger.warning(f"映射中未找到目标: {target}，尝试用可见昵称兜底: {nickname}")
+            nickname = _target_short_id(target) or str(target)
+            logger.warning(f"尝试用页面可见文本兜底查找: {nickname}")
+        else:
+            nickname = str(target)
+            logger.warning(f"映射中未找到目标: {target}，尝试用可见昵称兜底: {nickname}")
     else:
         nickname = info["nickname"]
 
