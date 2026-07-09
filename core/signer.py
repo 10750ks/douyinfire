@@ -4,6 +4,9 @@ from playwright.sync_api import sync_playwright
 
 import os as _os
 
+CREATOR_CHAT_URL = "https://creator.douyin.com/creator-micro/data/following/chat"
+WWW_CHAT_URL = "https://www.douyin.com/chat?isPopup=1"
+
 def _find_chrome():
     """定位 Playwright 安装的 Chromium"""
     import glob
@@ -20,8 +23,31 @@ def _find_chrome():
 CHROME_EXE = _find_chrome()
 
 
+def _looks_logged_out(page):
+    url = page.url or ""
+    if "login" in url or "passport" in url:
+        return True
+    try:
+        text = page.locator("body").inner_text(timeout=3000)
+    except Exception:
+        return False
+    login_words = ["登录", "扫码", "验证码", "请先登录"]
+    page_words = ["私信管理", "朋友私信", "群消息", "互动管理"]
+    return any(word in text for word in login_words) and not any(word in text for word in page_words)
+
+
+def _looks_www_logged_out(page):
+    try:
+        text = page.locator("body").inner_text(timeout=3000)
+    except Exception:
+        return False
+    login_words = ["登录", "扫码", "验证码", "请输入手机号"]
+    chat_words = ["发送消息", "分享[视频]", "火花"]
+    return any(word in text for word in login_words) and not any(word in text for word in chat_words)
+
+
 class Signer:
-    def __init__(self, cookies):
+    def __init__(self, cookies, storage_state=None):
         for c in cookies:
             if "sameSite" in c:
                 del c["sameSite"]
@@ -36,16 +62,22 @@ class Signer:
                 )
             else:
                 raise
-        ctx = self._browser.new_context()
+        context_args = {}
+        if storage_state:
+            context_args["storage_state"] = storage_state
+        ctx = self._browser.new_context(**context_args)
         ctx.set_default_navigation_timeout(120000)
         ctx.set_default_timeout(120000)
         page = ctx.new_page()
-        ctx.add_cookies(cookies)
-        page.goto(
-            "https://creator.douyin.com/creator-micro/data/following/chat",
-            timeout=60000,
-        )
+        if cookies:
+            ctx.add_cookies(cookies)
+        start_url = WWW_CHAT_URL if storage_state else CREATOR_CHAT_URL
+        page.goto(start_url, timeout=60000)
         page.wait_for_timeout(5000)
+        if storage_state and _looks_www_logged_out(page):
+            raise RuntimeError("网页版登录态可能已失效，请重新运行 export_web_state.py 导出 web_storage_state.json。")
+        if not storage_state and _looks_logged_out(page):
+            raise RuntimeError("Cookie 可能已失效，请重新导出 CONFIG/Cookie 后更新 GitHub Secret。")
         self.page = page
 
     def api_fetch(self, method, path, params=None, body=None):
