@@ -73,6 +73,7 @@ def _is_www_chat_ready(status):
 def _wait_www_chat_ready(page, max_seconds=90):
     last = {}
     login_markers = ["扫码登录", "请输入手机号", "验证码登录", "密码登录", "登录后免费畅享"]
+    login_seen_at = None
     for second in range(max_seconds):
         last = _www_chat_status(page)
         if _is_www_chat_ready(last):
@@ -82,9 +83,13 @@ def _wait_www_chat_ready(page, max_seconds=90):
             )
             return True, last
         text = last.get("text", "")
-        if any(word in text for word in login_markers) and second >= 10:
-            # 仍然多等一会儿，避免 GitHub 云端首屏文字先出来、数据稍后才挂载导致误判。
-            pass
+        if any(word in text for word in login_markers):
+            if login_seen_at is None:
+                login_seen_at = second
+            if second - login_seen_at >= 15:
+                last["loginPage"] = True
+                last["reason"] = "login_page"
+                return False, last
         page.wait_for_timeout(1000)
     return False, last
 
@@ -139,14 +144,23 @@ class Signer:
         ctx.set_default_navigation_timeout(120000)
         ctx.set_default_timeout(120000)
         page = ctx.new_page()
-        if cookies:
+        if cookies and not storage_state:
             ctx.add_cookies(cookies)
+        elif cookies and storage_state:
+            print("检测到 web_storage_state.json，跳过额外 cookies 注入，避免旧 Cookie 覆盖网页登录态。")
         start_url = WWW_CHAT_URL if storage_state else CREATOR_CHAT_URL
         page.goto(start_url, timeout=60000)
         if storage_state:
             ok, status = _wait_www_chat_ready(page, max_seconds=90)
             if not ok:
                 _dump_web_state_failure(page, status)
+                if status.get("reason") == "login_page":
+                    raise RuntimeError(
+                        "网页版登录态已被抖音拒绝，云端页面出现扫码/验证码登录框。"
+                        "请重新运行 export_web_state.py，扫码并完成验证，确认能看到私信列表后导出新的 "
+                        "web_storage_state.json；如果重新导出后 GitHub 仍然出现登录框，说明抖音不认可 "
+                        "GitHub 云端设备/IP，需要改用自托管 Runner 或本地/云电脑定时运行。"
+                    )
                 raise RuntimeError(
                     "网页版登录态可能已失效或云端加载超时。请先下载 run-logs 查看 "
                     "logs/signin-web-state-failed.png 和 logs/signin-web-state-failed.txt；"
