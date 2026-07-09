@@ -2,6 +2,7 @@
 import traceback
 import json
 import time
+import urllib.parse
 from pathlib import Path
 from core.signer import Signer
 from core.msg_builder import build_message
@@ -47,6 +48,9 @@ _SCROLL_CONTAINER_JS = """
 }
 """
 
+WWW_CHAT_URL = "https://www.douyin.com/chat?isPopup=1"
+WWW_CONV_ITEM_SELECTOR = 'div[class*="conversationConversationItemwrapper"]'
+
 
 def _type_and_send(page, label, logger):
     """在已打开的聊天窗口中输入消息并发送"""
@@ -63,6 +67,128 @@ def _type_and_send(page, label, logger):
     dump_debug_snapshot(page, f"after-send-{label}")
     logger.info(f"已给 {label} 发送续火花消息")
     return True
+
+
+def _looks_www_chat_logged_out(page):
+    try:
+        text = page.locator("body").inner_text(timeout=3000)
+    except Exception:
+        return False
+    login_words = ["登录", "扫码", "验证码", "请先登录"]
+    chat_words = ["发送消息", "搜索", "分享[视频]", "火花"]
+    return any(word in text for word in login_words) and not any(word in text for word in chat_words)
+
+
+def _type_and_send_www_chat(page, label, logger):
+    """在 www.douyin.com/chat 的聊天窗口中输入并发送消息。"""
+    message = build_message()
+    input_locator = page.locator(
+        'textarea[placeholder*="发送"], textarea[placeholder*="消息"], '
+        'div[contenteditable="true"], [contenteditable="true"], '
+        'input[placeholder*="发送"], input[placeholder*="消息"]'
+    ).last
+    input_locator.wait_for(timeout=config.get("browserTimeout", 120000))
+    input_locator.click()
+    for idx, line in enumerate(message.split("\n")):
+        input_locator.type(line)
+        if idx != len(message.split("\n")) - 1:
+            input_locator.press("Shift+Enter")
+    logger.debug(f"网页版发送: {message[:50]}...")
+    input_locator.press("Enter")
+    time.sleep(1)
+
+    # 有些版本按 Enter 只换行，需要点击右下角发送按钮。
+    page.evaluate("""
+    () => {
+        const candidates = Array.from(document.querySelectorAll('button, div, span, svg'))
+            .filter(el => el.offsetParent !== null);
+        const byText = candidates.find(el => /发送/.test(el.textContent || ''));
+        if (byText) { byText.click(); return true; }
+        const bottom = candidates
+            .map(el => ({ el, r: el.getBoundingClientRect() }))
+            .filter(x => x.r.width > 16 && x.r.height > 16 && x.r.bottom > window.innerHeight - 120)
+            .sort((a, b) => b.r.left - a.r.left);
+        if (bottom[0]) { bottom[0].el.click(); return true; }
+        return false;
+    }
+    """)
+    time.sleep(2)
+    dump_debug_snapshot(page, f"www-after-send-{label}")
+    logger.info(f"已通过网页版私信给 {label} 发送续火花消息")
+    return True
+
+
+def _find_www_chat_search_box(page):
+    return page.locator(
+        'input[placeholder*="搜索"], textarea[placeholder*="搜索"], '
+        'input[type="search"], input'
+    ).first
+
+
+def _click_www_chat_search_result(page, target_id, logger):
+    """搜索后点击 www 私信列表结果。优先点击包含目标文本的结果；否则仅在唯一可见结果时点击。"""
+    target = str(target_id).strip()
+    result = page.evaluate(
+        """
+        (target) => {
+            const normalize = (value) => String(value || '').replace(/\\s+/g, '').trim();
+            const targetText = normalize(target);
+            const items = Array.from(document.querySelectorAll('div[class*="conversationConversationItemwrapper"], div[class*="conversationConversationItem"]'))
+                .filter(el => el.offsetParent !== null);
+            const matched = items.find(el => normalize(el.textContent).includes(targetText));
+            if (matched) {
+                matched.click();
+                return { clicked: true, reason: 'text-match', text: matched.textContent.slice(0, 120) };
+            }
+            if (items.length === 1) {
+                items[0].click();
+                return { clicked: true, reason: 'single-result', text: items[0].textContent.slice(0, 120) };
+            }
+            return { clicked: false, count: items.length, sample: items.slice(0, 5).map(el => el.textContent.slice(0, 80)) };
+        }
+        """,
+        target,
+    )
+    if result and result.get("clicked"):
+        logger.info(f"网页版私信搜索命中 {target}: {result.get('reason')}")
+        return True
+    logger.warning(f"网页版私信搜索未能精确命中 {target}: {result}")
+    return False
+
+
+def _send_via_www_chat(page, target, logger):
+    """通过 www.douyin.com/chat 按抖音号搜索并发送，作为 short_id 模式兜底。"""
+    target_id = _target_short_id(target)
+    if not target_id:
+        return False
+    logger.info(f"尝试使用网页版私信按抖音号搜索发送: {target_id}")
+    try:
+        page.goto(WWW_CHAT_URL, wait_until="domcontentloaded", timeout=config.get("browserTimeout", 120000))
+        page.wait_for_timeout(5000)
+        if _looks_www_chat_logged_out(page):
+            raise RuntimeError("网页版私信页面疑似未登录，请重新导出 Cookie/CONFIG。")
+        try:
+            page.wait_for_selector(WWW_CONV_ITEM_SELECTOR, timeout=20000)
+        except Exception:
+            logger.warning("网页版私信会话列表未按预期加载，继续尝试搜索框")
+
+        search_box = _find_www_chat_search_box(page)
+        search_box.wait_for(timeout=20000)
+        search_box.click()
+        search_box.fill("")
+        search_box.type(target_id)
+        search_box.press("Enter")
+        page.wait_for_timeout(3000)
+
+        if not _click_www_chat_search_result(page, target_id, logger):
+            dump_debug_snapshot(page, f"www-search-not-found-{target_id}")
+            return False
+        page.wait_for_timeout(2000)
+        return _type_and_send_www_chat(page, target_id, logger)
+    except Exception as e:
+        logger.error(f"网页版私信发送失败: {e}")
+        dump_debug_snapshot(page, f"www-send-failed-{target_id}")
+        return False
 
 
 def _match_target(mapping, target, mode):
@@ -82,6 +208,14 @@ def _target_short_id(target):
     for sep in ["：", ":"]:
         if sep in text:
             return text.split(sep, 1)[1].strip()
+    return text
+
+
+def _target_visible_name(target):
+    text = str(target).strip()
+    for sep in ["：", ":"]:
+        if sep in text:
+            return text.split(sep, 1)[0].strip()
     return text
 
 
@@ -141,13 +275,85 @@ def handle_response_for_map(resp, mapping):
     if resp.status != 200:
         return
     url = resp.url
-    if not any(key in url for key in ["user_detail", "creator/im", "/im/", "following", "chat"]):
+    if not any(key in url for key in ["user_detail", "creator/im", "/im/", "following", "chat", "search", "aweme/v1/web"]):
         return
     try:
         data = resp.json()
         _walk_json_for_users(data, mapping)
     except Exception:
         pass
+
+
+def _guess_nickname_from_search_text(text, short_id):
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    skip_words = {"抖音", "搜索", "用户", "视频", "综合", "直播", "抖音号", short_id}
+    for index, line in enumerate(lines):
+        if short_id not in line:
+            continue
+        for offset in (-1, -2, 1, 2):
+            pos = index + offset
+            if pos < 0 or pos >= len(lines):
+                continue
+            candidate = lines[pos].strip()
+            if not candidate or candidate in skip_words:
+                continue
+            if len(candidate) <= 40 and short_id not in candidate:
+                return candidate
+    return ""
+
+
+def resolve_nickname_by_short_id(page, target, logger):
+    """通过抖音搜索页动态解析 short_id 当前昵称。失败时返回空字符串。"""
+    short_id = _target_short_id(target)
+    if not short_id:
+        return ""
+
+    mapping = {}
+    search_page = None
+
+    def on_resp(resp):
+        handle_response_for_map(resp, mapping)
+
+    try:
+        logger.info(f"尝试通过抖音搜索解析抖音号: {short_id}")
+        search_page = page.context.new_page()
+        search_page.on("response", on_resp)
+        url = f"https://www.douyin.com/search/{urllib.parse.quote(short_id)}?type=user"
+        search_page.goto(url, wait_until="domcontentloaded", timeout=config.get("browserTimeout", 120000))
+        search_page.wait_for_timeout(8000)
+        try:
+            search_page.mouse.wheel(0, 600)
+            search_page.wait_for_timeout(2000)
+        except Exception:
+            pass
+
+        info = _match_target(mapping, short_id, "short_id")
+        if info and info.get("nickname"):
+            logger.info(f"搜索页解析到抖音号 {short_id} 当前昵称: {info['nickname']}")
+            return info["nickname"]
+
+        try:
+            text = search_page.locator("body").inner_text(timeout=5000)
+        except Exception:
+            text = ""
+        guessed = _guess_nickname_from_search_text(text, short_id)
+        if guessed:
+            logger.info(f"搜索页文本推断抖音号 {short_id} 当前昵称: {guessed}")
+            return guessed
+
+        dump_debug_snapshot(search_page, f"search-shortid-{short_id}")
+        logger.warning(f"未能通过搜索页解析抖音号: {short_id}")
+    except Exception as e:
+        logger.warning(f"搜索解析抖音号 {short_id} 失败: {e}")
+    finally:
+        try:
+            if search_page:
+                search_page.remove_listener("response", on_resp)
+                search_page.close()
+        except Exception:
+            pass
+
+    return ""
 
 
 def scroll_and_find(page, mapping, logger):
@@ -188,7 +394,8 @@ def try_click_and_send(page, target, mapping, logger):
     if not info:
         if matchMode == "short_id":
             logger.warning(f"映射中未找到目标抖音号: {target}")
-            nickname = _target_short_id(target) or str(target)
+            resolved = resolve_nickname_by_short_id(page, target, logger)
+            nickname = resolved or _target_visible_name(target) or _target_short_id(target) or str(target)
             logger.warning(f"尝试用页面可见文本兜底查找: {nickname}")
         else:
             nickname = str(target)
@@ -258,6 +465,8 @@ def try_click_and_send(page, target, mapping, logger):
     if not clicked:
         logger.warning(f"未找到可见的 {nickname}")
         dump_debug_snapshot(page, f"not-visible-{nickname}")
+        if matchMode == "short_id" and _send_via_www_chat(page, target, logger):
+            return True
         return False
 
     time.sleep(2)
