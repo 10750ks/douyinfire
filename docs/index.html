@@ -186,6 +186,12 @@
       font-size: 12px;
       line-height: 1.45;
     }
+    .size-line {
+      margin: -4px 0 10px;
+      color: #667085;
+      font-size: 12px;
+    }
+    .size-line.warn { color: #b42318; font-weight: 700; }
     @media (max-width: 920px) {
       .layout { grid-template-columns: 1fr; }
       .preview { position: static; }
@@ -201,7 +207,7 @@
         <h1>DouYinSparkFlow 配置生成器</h1>
         <p class="hint">这个页面是单文件版本，只上传 docs/index.html 也能使用。</p>
       </div>
-      <button class="primary" id="copyTop">复制 CONFIG</button>
+      <button class="primary" id="copyTop">复制压缩版 CONFIG</button>
     </div>
 
     <div class="layout">
@@ -255,6 +261,14 @@
                 <option>Error</option>
               </select>
             </div>
+            <div class="field full">
+              <label>私信发送通道</label>
+              <div class="switch-row">
+                <label><input id="preferWebChat" type="checkbox" checked> 优先网页版私信</label>
+                <label><input id="allowCreatorFallback" type="checkbox"> 允许创作者中心兜底</label>
+              </div>
+              <div class="small">推荐只开“优先网页版私信”。创作者中心可能显示已发但 App 不同步。</div>
+            </div>
           </div>
         </div>
 
@@ -306,9 +320,10 @@
 
       <aside class="panel preview">
         <h2>CONFIG 配置预览</h2>
+        <div class="size-line" id="configSize"></div>
         <pre id="preview"></pre>
         <div class="actions">
-          <button class="primary" id="copyConfig">一键复制 CONFIG</button>
+          <button class="primary" id="copyConfig">复制压缩版 CONFIG</button>
           <button id="downloadConfig">下载 config.json</button>
         </div>
         <div class="status" id="status"></div>
@@ -363,6 +378,8 @@
         friendListTimeout: numberValue("friendListTimeout", 2000),
         taskRetryTimes: numberValue("taskRetryTimes", 3),
         logLevel: $("logLevel").value,
+        preferWebChat: $("preferWebChat").checked,
+        allowCreatorFallback: $("allowCreatorFallback").checked,
         notify: {
           enabled: $("notifyEnabled").checked,
           channels: {
@@ -397,7 +414,12 @@
     }
 
     function renderPreview() {
-      $("preview").textContent = JSON.stringify(collectConfig(), null, 2);
+      const pretty = JSON.stringify(collectConfig(), null, 2);
+      const compact = getCompactConfig();
+      const compactBytes = byteLength(compact);
+      $("preview").textContent = pretty;
+      $("configSize").textContent = `复制到 GitHub Secret 时会使用压缩版：${formatBytes(compactBytes)} / 48 KB`;
+      $("configSize").className = compactBytes > 48 * 1024 ? "size-line warn" : "size-line";
     }
 
     function renderHitokotoTypes() {
@@ -456,8 +478,25 @@
       return escapeHtml(value).replaceAll('"', "&quot;");
     }
 
+    function getCompactConfig() {
+      return JSON.stringify(collectConfig());
+    }
+
+    function byteLength(text) {
+      return new TextEncoder().encode(text).length;
+    }
+
+    function formatBytes(bytes) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+
     async function copyConfig() {
-      const text = $("preview").textContent;
+      const text = getCompactConfig();
+      const bytes = byteLength(text);
+      if (bytes > 48 * 1024) {
+        setStatus(`压缩后仍有 ${formatBytes(bytes)}，超过 GitHub Secret 48 KB 限制。`, true);
+        return;
+      }
       try {
         if (navigator.clipboard && window.isSecureContext) {
           await navigator.clipboard.writeText(text);
@@ -472,9 +511,9 @@
           document.execCommand("copy");
           textarea.remove();
         }
-        setStatus("CONFIG 已复制到剪贴板");
+        setStatus(`压缩版 CONFIG 已复制，大小 ${formatBytes(bytes)}`);
       } catch (error) {
-        setStatus("复制失败，请手动复制右侧 CONFIG。", true);
+        setStatus("复制失败，请手动复制右侧 CONFIG 后自行压缩。", true);
       }
     }
 
