@@ -126,6 +126,136 @@ def _find_www_chat_search_box(page):
     ).first
 
 
+def _wait_www_chat_ready(page, logger, max_seconds=75):
+    for _ in range(max_seconds):
+        status = page.evaluate(
+            """() => ({
+                hasConvStore: !!window.conversationStore,
+                convItems: document.querySelectorAll('div[class*="conversationConversationItemwrapper"]').length,
+                hasUserStore: !!window.userInfoStore,
+                userCount: window.userInfoStore?.usersInfoMap?.data_?.size || 0,
+                text: (document.body && document.body.innerText || '').slice(0, 120)
+            })"""
+        )
+        if status.get("hasConvStore") and (status.get("convItems", 0) > 0 or status.get("userCount", 0) > 0):
+            logger.info(
+                f"网页版私信加载完成: convItems={status.get('convItems')}, userCount={status.get('userCount')}"
+            )
+            return True
+        if "扫码登录" in status.get("text", "") or "请输入手机号" in status.get("text", ""):
+            return False
+        page.wait_for_timeout(1000)
+    logger.warning("网页版私信加载超时，继续尝试当前页面")
+    return False
+
+
+def _wait_www_user_cache(page, logger, max_seconds=75):
+    for _ in range(max_seconds):
+        count = page.evaluate("() => window.userInfoStore?.usersInfoMap?.data_?.size || 0")
+        if count:
+            logger.info(f"网页版用户缓存加载完成: userCount={count}")
+            return True
+        page.wait_for_timeout(1000)
+    logger.warning("网页版用户缓存加载超时，可能无法按抖音号解析会话")
+    return False
+
+
+def _wait_www_user_by_short_id(page, target_id, logger, max_seconds=90):
+    for _ in range(max_seconds):
+        user = _resolve_www_user_by_short_id(page, target_id)
+        if user:
+            logger.info(f"网页版目标用户缓存命中: short_id={target_id}, display={user.get('display_name')}")
+            return user
+        page.wait_for_timeout(1000)
+    logger.warning(f"网页版目标用户缓存未命中: {target_id}")
+    return None
+
+
+def _resolve_www_user_by_short_id(page, target_id):
+    return page.evaluate(
+        """
+        (target) => {
+            const wanted = String(target || '').trim();
+            const m = window.userInfoStore?.usersInfoMap?.data_;
+            if (!m) return null;
+            for (const [key, boxed] of m.entries()) {
+                const u = boxed?.value_ !== undefined ? boxed.value_ : boxed;
+                if (!u) continue;
+                const ids = [u.short_id, u.unique_id, u.uid, key].map(x => String(x || '').trim()).filter(Boolean);
+                if (ids.includes(wanted)) {
+                    return {
+                        uid: String(u.uid || key || ''),
+                        short_id: String(u.short_id || ''),
+                        unique_id: String(u.unique_id || ''),
+                        nickname: String(u.nickname || ''),
+                        remark_name: String(u.remark_name || ''),
+                        display_name: String(u.remark_name || u.nickname || u.unique_id || u.short_id || wanted)
+                    };
+                }
+            }
+            return null;
+        }
+        """,
+        str(target_id),
+    )
+
+
+def _click_www_chat_by_visible_name(page, name, logger):
+    def try_match():
+        return page.evaluate(
+            """
+            (targetName) => {
+                const normalize = s => String(s || '').replace(/[\\s\\u00a0]+/g, ' ').trim();
+                const target = normalize(targetName);
+                const items = Array.from(document.querySelectorAll('div[class*="conversationConversationItemwrapper"]'));
+                const names = [];
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    const titleEl = item.querySelector('div[class*="conversationConversationItemtitle"]') || item;
+                    const fullText = normalize(titleEl.textContent);
+                    names.push(fullText.slice(0, 30));
+                    if (fullText === target || fullText.includes(target) || target.includes(fullText)) {
+                        return { index: i, text: fullText, names };
+                    }
+                }
+                return { index: -1, text: '', names };
+            }
+            """,
+            name,
+        )
+
+    result = try_match()
+    if result.get("index", -1) >= 0:
+        page.locator(WWW_CONV_ITEM_SELECTOR).nth(result["index"]).click(timeout=10000)
+        logger.info(f"网页版私信按用户缓存命中会话: {name}")
+        return True
+
+    page.evaluate(
+        """() => {
+            const list = document.querySelector('div[class*="conversationConversationListwrapper"]');
+            const scrollable = list?.querySelector('[style*="overflow"]') || list;
+            if (scrollable) scrollable.scrollTop = 0;
+        }"""
+    )
+    page.wait_for_timeout(500)
+    for _ in range(30):
+        result = try_match()
+        if result.get("index", -1) >= 0:
+            page.locator(WWW_CONV_ITEM_SELECTOR).nth(result["index"]).click(timeout=10000)
+            logger.info(f"网页版私信滚动后命中会话: {name}")
+            return True
+        page.evaluate(
+            """() => {
+                const list = document.querySelector('div[class*="conversationConversationListwrapper"]');
+                const scrollable = list?.querySelector('[style*="overflow"]') || list;
+                if (scrollable) scrollable.scrollTop += 480;
+            }"""
+        )
+        page.wait_for_timeout(300)
+    logger.warning(f"网页版私信未找到可见会话名 {name}: {result.get('names', [])}")
+    return False
+
+
 def _click_www_chat_search_result(page, target_id, logger):
     """搜索后点击 www 私信列表结果。优先点击包含目标文本的结果；否则仅在唯一可见结果时点击。"""
     target = str(target_id).strip()
@@ -165,13 +295,23 @@ def _send_via_www_chat(page, target, logger):
     logger.info(f"尝试使用网页版私信按抖音号搜索发送: {target_id}")
     try:
         page.goto(WWW_CHAT_URL, wait_until="domcontentloaded", timeout=config.get("browserTimeout", 120000))
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(3000)
         if _looks_www_chat_logged_out(page):
             raise RuntimeError("网页版私信页面疑似未登录，请重新导出 Cookie/CONFIG。")
-        try:
-            page.wait_for_selector(WWW_CONV_ITEM_SELECTOR, timeout=20000)
-        except Exception:
-            logger.warning("网页版私信会话列表未按预期加载，继续尝试搜索框")
+        if not _wait_www_chat_ready(page, logger):
+            raise RuntimeError("网页版私信页面未加载完成或疑似未登录，请检查 web_storage_state。")
+
+        user = _wait_www_user_by_short_id(page, target_id, logger)
+        if user:
+            logger.info(
+                f"已从网页版用户缓存解析抖音号 {target_id}: uid={user.get('uid')}, display={user.get('display_name')}"
+            )
+            if _click_www_chat_by_visible_name(page, user.get("display_name"), logger):
+                page.wait_for_timeout(2000)
+                return _type_and_send_www_chat(page, target_id, logger)
+            dump_debug_snapshot(page, f"www-cache-not-visible-{target_id}")
+            return False
+        logger.warning(f"网页版用户缓存未解析到抖音号 {target_id}，回退搜索框")
 
         search_box = _find_www_chat_search_box(page)
         search_box.wait_for(timeout=20000)
@@ -649,7 +789,7 @@ def runTasks():
 
         signer = None
         try:
-            signer = Signer(cookies)
+            signer = Signer(cookies, user.get("web_storage_state"))
             if targets:
                 failures.extend([f"{username}:{target}" for target in do_user_task(signer, username, targets)])
             if groups:
