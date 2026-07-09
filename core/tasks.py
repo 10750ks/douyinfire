@@ -50,6 +50,7 @@ _SCROLL_CONTAINER_JS = """
 
 WWW_CHAT_URL = "https://www.douyin.com/chat?isPopup=1"
 WWW_CONV_ITEM_SELECTOR = 'div[class*="conversationConversationItemwrapper"]'
+CREATOR_CHAT_URL = "https://creator.douyin.com/creator-micro/data/following/chat"
 
 
 def _type_and_send(page, label, logger):
@@ -389,6 +390,19 @@ def scroll_and_find(page, mapping, logger):
 
 def try_click_and_send(page, target, mapping, logger):
     """尝试点击一个目标好友并发送消息。返回 True 如果成功。"""
+    if matchMode == "short_id" and config.get("preferWebChat", True):
+        if _send_via_www_chat(page, target, logger):
+            return True
+        if not config.get("allowCreatorFallback", False):
+            logger.warning("网页版私信发送失败，未启用创作者中心兜底，本目标按失败处理。")
+            return False
+        logger.warning("网页版私信发送失败，回退到创作者中心私信。")
+        try:
+            page.goto(CREATOR_CHAT_URL, wait_until="domcontentloaded", timeout=config.get("browserTimeout", 120000))
+            page.wait_for_timeout(3000)
+        except Exception as e:
+            logger.warning(f"回到创作者中心失败，继续尝试当前页面: {e}")
+
     info = _match_target(mapping, target, matchMode)
 
     if not info:
