@@ -323,6 +323,7 @@
       username: "user1",
       unique_id: "12345678905",
       cookies: "cookie1",
+      web_cookies: "",
       targets: "friend1, friend2",
       groups: ""
     }];
@@ -388,6 +389,7 @@
           username: account.username.trim(),
           unique_id: account.unique_id.trim(),
           cookies: normalizeCookies(account.cookies),
+          web_cookies: normalizeCookies(account.web_cookies),
           targets: splitList(account.targets),
           groups: splitList(account.groups)
         }))
@@ -424,6 +426,10 @@
             <div class="field full">
               <label for="cookies-${index}">Cookies JSON</label>
               <textarea id="cookies-${index}" data-account="${index}" data-key="cookies" placeholder="把 Cookie-Editor 导出的 JSON 粘贴到这里">${escapeHtml(account.cookies)}</textarea>
+            </div>
+            <div class="field full">
+              <label for="web-cookies-${index}">网页版 Cookies JSON（可选）</label>
+              <textarea id="web-cookies-${index}" data-account="${index}" data-key="web_cookies" placeholder="在 https://www.douyin.com/chat 登录后导出的 Cookie-Editor JSON，可不填">${escapeHtml(account.web_cookies)}</textarea>
             </div>
             <div class="field">
               <label for="targets-${index}">目标好友</label>
@@ -506,7 +512,7 @@
         }
       });
       $("addAccount").addEventListener("click", () => {
-        accounts.push({ username: "", unique_id: "", cookies: "", targets: "", groups: "" });
+        accounts.push({ username: "", unique_id: "", cookies: "", web_cookies: "", targets: "", groups: "" });
         renderAccounts();
       });
       $("copyTop").addEventListener("click", copyConfig);
