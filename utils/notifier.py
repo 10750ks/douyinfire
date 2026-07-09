@@ -114,10 +114,10 @@ def send_qq_email(section: Dict, title: str, content: str) -> str:
 def notify_failure(config: Dict, title: str, lines: Iterable[str], logger) -> None:
     notify = config.get("notify", {}) or {}
     channels = notify.get("channels", {}) or {}
-    status = {
-        name: _enabled(channels.get(name, {}) or {})
+    status = ",".join(
+        f"{name}={1 if _enabled(channels.get(name, {}) or {}) else 0}"
         for name in ("wxpusher", "wecom", "qq_email")
-    }
+    )
     logger.info(f"失败通知配置: enabled={_enabled(notify)}, channels={status}")
     if not _enabled(notify):
         logger.info("失败通知未启用，跳过推送")
