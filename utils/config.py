@@ -74,6 +74,65 @@ def parse_cookie_value(value):
     return value if isinstance(value, list) else []
 
 
+def parse_storage_state_value(value):
+    if not value:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            path = Path(text)
+            if not path.is_absolute():
+                path = project_root() / path
+            if path.exists():
+                return read_json(path, None)
+            logger.warning("web_storage_state 既不是合法 JSON，也不是存在的文件路径")
+    return None
+
+
+def resolve_storage_state(account, full):
+    env_state = os.getenv("WEB_STORAGE_STATE")
+    if not env_state:
+        chunks = []
+        for i in range(1, 21):
+            chunk = os.getenv(f"WEB_STORAGE_STATE_{i}")
+            if not chunk:
+                break
+            chunks.append(chunk)
+        if chunks:
+            env_state = "".join(chunks)
+
+    state = (
+        account.get("web_storage_state")
+        or account.get("webStorageState")
+        or full.get("web_storage_state")
+        or full.get("webStorageState")
+        or env_state
+    )
+    parsed = parse_storage_state_value(state)
+    if parsed:
+        return parsed
+
+    state_file = (
+        account.get("web_storage_state_file")
+        or account.get("webStorageStateFile")
+        or full.get("web_storage_state_file")
+        or full.get("webStorageStateFile")
+        or "web_storage_state.json"
+    )
+    state_path = Path(state_file)
+    if not state_path.is_absolute():
+        state_path = project_root() / state_path
+    if state_path.exists():
+        return read_json(state_path, None)
+    return None
+
+
 def resolve_cookies(account, full):
     cookies = []
     cookies.extend(parse_cookie_value(account.get("cookies") or full.get("cookies") or []))
@@ -171,14 +230,16 @@ def _load_config():
     for account in full.get("accounts", []):
         username = account.get("username", "未知用户")
         cookies = resolve_cookies(account, full)
-        if not cookies:
-            logger.warning(f"账户 {username} 的 cookies 为空，已跳过")
+        storage_state = resolve_storage_state(account, full)
+        if not cookies and not storage_state:
+            logger.warning(f"账户 {username} 的 cookies 和 web_storage_state 都为空，已跳过")
             continue
         userData_cache.append(
             {
                 "unique_id": account.get("unique_id", username),
                 "username": username,
                 "cookies": cookies,
+                "web_storage_state": storage_state,
                 "targets": account.get("targets", []),
                 "groups": account.get("groups", []),
             }
