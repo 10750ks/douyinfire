@@ -162,6 +162,8 @@ def _load_config():
         "friendListTimeout": int(full.get("friendListTimeout", 2000)),
         "taskRetryTimes": int(full.get("taskRetryTimes", 3)),
         "logLevel": full.get("logLevel", "Info"),
+        "preferWebChat": full.get("preferWebChat", True),
+        "allowCreatorFallback": full.get("allowCreatorFallback", False),
         "notify": full.get("notify", {}),
     }
 
