@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+import hashlib
 from enum import Enum
 from pathlib import Path
 
@@ -105,18 +106,42 @@ def _load_config():
 
     raw = os.getenv("CONFIG", "")
     full = {}
+    source = "CONFIG 环境变量"
     if raw:
         try:
             full = json.loads(raw)
         except json.JSONDecodeError as e:
             logger.error(f"CONFIG 环境变量不是合法的 JSON: {e}")
+            if get_environment() == Environment.GITHUBACTION:
+                raise RuntimeError("CONFIG Secret 不是合法 JSON，请重新复制配置生成器输出的完整 CONFIG。") from e
     else:
+        if get_environment() == Environment.GITHUBACTION:
+            raise RuntimeError("GitHub Actions 未读取到 CONFIG Secret，请检查仓库 Settings -> Secrets and variables -> Actions。")
         config_file = project_root() / "config.json"
+        source = str(config_file)
         full = read_json(config_file, {})
         if full:
             logger.info(f"从 {config_file} 加载配置")
 
     full = normalize_full_config(full)
+    raw_for_hash = raw or json.dumps(full, ensure_ascii=False, sort_keys=True)
+    config_hash = hashlib.sha256(raw_for_hash.encode("utf-8")).hexdigest()[:12]
+    notify = full.get("notify", {}) or {}
+    channels = notify.get("channels", {}) or {}
+    channel_status = ",".join(
+        f"{name}={1 if bool((channels.get(name, {}) or {}).get('enabled', False)) else 0}"
+        for name in ("wxpusher", "wecom", "qq_email")
+    )
+    logger.info(
+        "配置摘要: source=%s, fingerprint=%s, accounts=%s, targets=%s, groups=%s, notify=%s, channels=%s",
+        source,
+        config_hash,
+        len(full.get("accounts", [])),
+        sum(len(account.get("targets", []) or []) for account in full.get("accounts", [])),
+        sum(len(account.get("groups", []) or []) for account in full.get("accounts", [])),
+        bool(notify.get("enabled", False)),
+        channel_status,
+    )
 
     config_cache = {
         "messageTemplate": full.get("messageTemplate", "续火"),
@@ -127,6 +152,7 @@ def _load_config():
         "friendListTimeout": int(full.get("friendListTimeout", 2000)),
         "taskRetryTimes": int(full.get("taskRetryTimes", 3)),
         "logLevel": full.get("logLevel", "Info"),
+        "notify": full.get("notify", {}),
     }
 
     userData_cache = []
