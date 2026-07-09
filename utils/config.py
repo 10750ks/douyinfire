@@ -44,7 +44,7 @@ def read_json(path: Path, fallback):
 
 def sanitize_cookies(cookies):
     allowed = {"name", "value", "domain", "path", "expires", "httpOnly", "secure"}
-    cleaned = []
+    cleaned = {}
     for cookie in cookies:
         if not isinstance(cookie, dict):
             continue
@@ -57,18 +57,28 @@ def sanitize_cookies(cookies):
                 item.pop(key, None)
         item.setdefault("path", "/")
         if item.get("name") and item.get("value"):
-            cleaned.append(item)
-    return cleaned
+            dedupe_key = (item.get("domain", ""), item.get("path", "/"), item.get("name", ""))
+            cleaned[dedupe_key] = item
+    return list(cleaned.values())
+
+
+def parse_cookie_value(value):
+    if not value:
+        return []
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            logger.warning("cookies 字符串不是合法 JSON")
+            return []
+    return value if isinstance(value, list) else []
 
 
 def resolve_cookies(account, full):
-    cookies = account.get("cookies") or full.get("cookies") or []
-    if isinstance(cookies, str):
-        try:
-            cookies = json.loads(cookies)
-        except json.JSONDecodeError:
-            logger.warning("cookies 字符串不是合法 JSON")
-            cookies = []
+    cookies = []
+    cookies.extend(parse_cookie_value(account.get("cookies") or full.get("cookies") or []))
+    cookies.extend(parse_cookie_value(account.get("web_cookies") or full.get("web_cookies") or []))
+    cookies.extend(parse_cookie_value(account.get("webCookies") or full.get("webCookies") or []))
 
     cookie_file = account.get("cookies_file") or full.get("cookies_file")
     if not cookies and cookie_file:
