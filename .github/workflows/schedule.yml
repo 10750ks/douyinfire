@@ -21,6 +21,16 @@ jobs:
         pip install -r requirements.txt
     - name: Ensure browsers are installed
       run: playwright install chromium --with-deps
+    - name: Decrypt web storage state
+      env:
+        WEB_STATE_PASSPHRASE: ${{ secrets.WEB_STATE_PASSPHRASE }}
+      run: |
+        if [ -f web_storage_state.json.gpg ] && [ -n "$WEB_STATE_PASSPHRASE" ]; then
+          gpg --quiet --batch --yes --decrypt --passphrase "$WEB_STATE_PASSPHRASE" --output web_storage_state.json web_storage_state.json.gpg
+          echo "web_storage_state.json decrypted"
+        else
+          echo "web_storage_state.json.gpg or WEB_STATE_PASSPHRASE not found, skip decrypt"
+        fi
     - name: Run DouYin Spark Flow
       env:
         CONFIG: ${{ secrets.CONFIG }}
