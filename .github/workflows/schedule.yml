@@ -1,52 +1,82 @@
 name: DouYin Spark Flow Schedule Run
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: "10 16 * * *" # UTC 16:10 = 北京时间 00:10
+    - cron: "12 0 * * *"
+      timezone: "Asia/Shanghai"
+
+concurrency:
+  group: douyin-spark-flow
+  cancel-in-progress: false
+
 jobs:
   run-main:
+    name: Run DouYin Spark Flow
     timeout-minutes: 20
     runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-    - name: Test Douyin Accessibility
-      run: |
-        curl -I https://creator.douyin.com/
-    - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
-    - name: Ensure browsers are installed
-      run: playwright install chromium --with-deps
-    - name: Decrypt web storage state
-      env:
-        WEB_STATE_PASSPHRASE: ${{ secrets.WEB_STATE_PASSPHRASE }}
-      run: |
-        if [ -f web_storage_state.json.gpg ] && [ -n "$WEB_STATE_PASSPHRASE" ]; then
-          gpg --quiet --batch --yes --decrypt --passphrase "$WEB_STATE_PASSPHRASE" --output web_storage_state.json web_storage_state.json.gpg
-          echo "web_storage_state.json decrypted"
-        else
-          echo "web_storage_state.json.gpg or WEB_STATE_PASSPHRASE not found, skip decrypt"
-        fi
-    - name: Run DouYin Spark Flow
-      env:
-        CONFIG: ${{ secrets.CONFIG }}
-      run: python main.py
-    - uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: run-logs
-        path: |
-          logs/
-          debug-*.png
-          debug-*.txt
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Test Douyin accessibility
+        run: curl -I https://creator.douyin.com/
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Ensure browser is installed
+        run: playwright install chromium --with-deps
+
+      - name: Decrypt web storage state
+        env:
+          WEB_STATE_PASSPHRASE: ${{ secrets.WEB_STATE_PASSPHRASE }}
+        run: |
+          if [ -f web_storage_state.json.enc ]; then
+            python decrypt_web_state.py
+          elif [ -f web_storage_state.json.gpg ] && [ -n "$WEB_STATE_PASSPHRASE" ]; then
+            gpg --quiet --batch --yes --decrypt \
+              --passphrase "$WEB_STATE_PASSPHRASE" \
+              --output web_storage_state.json \
+              web_storage_state.json.gpg
+            echo "web_storage_state.json decrypted from gpg"
+          else
+            echo "No encrypted web state found, continue with repository web_storage_state.json if present"
+          fi
+
+      - name: Run DouYin Spark Flow
+        env:
+          CONFIG: ${{ secrets.CONFIG }}
+        run: python main.py
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-logs
+          path: |
+            logs/
+            debug-*.png
+            debug-*.txt
+
+      - name: Remove temporary web state
+        if: always()
+        run: rm -f web_storage_state.json.tmp
+
   workflow-keepalive:
+    name: Keep scheduled workflow alive
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       actions: write
+
     steps:
-      - uses: liskin/gh-workflow-keepalive@v1
+      - name: Keep workflow alive
+        uses: liskin/gh-workflow-keepalive@v1
