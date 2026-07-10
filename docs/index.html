@@ -267,7 +267,7 @@
                 <label><input id="preferWebChat" type="checkbox" checked> 优先网页版私信</label>
                 <label><input id="allowCreatorFallback" type="checkbox"> 允许创作者中心兜底</label>
               </div>
-              <div class="small">推荐只开“优先网页版私信”。创作者中心可能显示已发但 App 不同步。</div>
+              <div class="small">网页版使用 web_storage_state.json，创作者中心功能仍保留。有 webjson 时 Cookie 会跳过；只有无 webjson、单独走创作者中心时才读取 Cookie。</div>
             </div>
           </div>
         </div>
@@ -337,7 +337,7 @@
     const accounts = [{
       username: "user1",
       unique_id: "12345678905",
-      cookies: "cookie1",
+      cookies: "",
       web_cookies: "",
       targets: "friend1, friend2",
       groups: ""
@@ -446,12 +446,12 @@
               <input id="unique-${index}" data-account="${index}" data-key="unique_id" value="${escapeAttr(account.unique_id)}">
             </div>
             <div class="field full">
-              <label for="cookies-${index}">Cookies JSON</label>
-              <textarea id="cookies-${index}" data-account="${index}" data-key="cookies" placeholder="把 Cookie-Editor 导出的 JSON 粘贴到这里">${escapeHtml(account.cookies)}</textarea>
+              <label for="cookies-${index}">创作者中心 Cookies JSON（无 webjson 时使用）</label>
+              <textarea id="cookies-${index}" data-account="${index}" data-key="cookies" placeholder="当前有 web_storage_state.json 时留空；仅无 webjson、单独走创作者中心时填写">${escapeHtml(account.cookies)}</textarea>
             </div>
             <div class="field full">
-              <label for="web-cookies-${index}">网页版 Cookies JSON（可选）</label>
-              <textarea id="web-cookies-${index}" data-account="${index}" data-key="web_cookies" placeholder="在 https://www.douyin.com/chat 登录后导出的 Cookie-Editor JSON，可不填">${escapeHtml(account.web_cookies)}</textarea>
+              <label for="web-cookies-${index}">网页版 Cookies JSON（旧版兼容，可留空）</label>
+              <textarea id="web-cookies-${index}" data-account="${index}" data-key="web_cookies" placeholder="当前使用 web_storage_state.json，这里通常留空">${escapeHtml(account.web_cookies)}</textarea>
             </div>
             <div class="field">
               <label for="targets-${index}">目标好友</label>
