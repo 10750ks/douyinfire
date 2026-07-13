@@ -256,6 +256,168 @@ def _click_www_chat_by_visible_name(page, name, logger):
     return False
 
 
+def _resolve_www_group_by_id(page, target_id):
+    """Best-effort lookup for a group conversation in the www chat runtime cache."""
+    return page.evaluate(
+        """
+        (target) => {
+            const wanted = String(target || '').trim();
+            if (!wanted) return null;
+            const seen = new Set();
+            const candidates = [];
+            let visited = 0;
+            const nameKey = /(name|title|display|remark|nickname)/i;
+            const idKey = /(id|cid|conversation|conversation_id|conversationId|short)/i;
+            const groupKey = /(group|群)/i;
+            const unwrap = value => value && value.value_ !== undefined ? value.value_ : value;
+            const text = value => value === undefined || value === null ? '' : String(value).trim();
+
+            function addCandidate(obj, path) {
+                const ids = [];
+                const names = [];
+                let groupLike = groupKey.test(path);
+                for (const [k, raw] of Object.entries(obj)) {
+                    const v = unwrap(raw);
+                    if (typeof v !== 'string' && typeof v !== 'number') continue;
+                    const s = text(v);
+                    if (!s) continue;
+                    if (idKey.test(k)) ids.push(s);
+                    if (nameKey.test(k)) names.push(s);
+                    if (groupKey.test(k) || groupKey.test(s)) groupLike = true;
+                }
+                const exact = ids.some(id => id === wanted);
+                const contains = ids.some(id => id.includes(wanted) || wanted.includes(id));
+                if (exact || (groupLike && contains)) {
+                    candidates.push({
+                        id: ids.find(id => id === wanted) || ids[0] || wanted,
+                        display_name: names.find(Boolean) || '',
+                        group_like: groupLike,
+                        path
+                    });
+                }
+            }
+
+            function walk(value, path, depth) {
+                if (visited++ > 5000 || depth > 7) return;
+                value = unwrap(value);
+                if (!value || typeof value !== 'object') return;
+                if (seen.has(value)) return;
+                seen.add(value);
+
+                if (value instanceof Map) {
+                    for (const [k, v] of value.entries()) {
+                        if (text(k) === wanted) {
+                            const unboxed = unwrap(v);
+                            if (unboxed && typeof unboxed === 'object') addCandidate(unboxed, `${path}.${k}`);
+                        }
+                        walk(v, `${path}.${k}`, depth + 1);
+                    }
+                    return;
+                }
+
+                if (Array.isArray(value)) {
+                    for (let i = 0; i < Math.min(value.length, 300); i++) {
+                        walk(value[i], `${path}[${i}]`, depth + 1);
+                    }
+                    return;
+                }
+
+                addCandidate(value, path);
+                for (const [k, v] of Object.entries(value)) {
+                    if (typeof v === 'object' && v !== null) walk(v, `${path}.${k}`, depth + 1);
+                }
+            }
+
+            walk(window.conversationStore, 'conversationStore', 0);
+            walk(window.__pace_f?.store, '__pace_f.store', 0);
+
+            candidates.sort((a, b) => {
+                if (!!b.display_name !== !!a.display_name) return b.display_name ? 1 : -1;
+                if (!!b.group_like !== !!a.group_like) return b.group_like ? 1 : -1;
+                return 0;
+            });
+            return candidates[0] || null;
+        }
+        """,
+        str(target_id),
+    )
+
+
+def _wait_www_group_by_id(page, target_id, logger, max_seconds=75):
+    for _ in range(max_seconds):
+        group = _resolve_www_group_by_id(page, target_id)
+        if group:
+            logger.info(
+                f"网页版群聊缓存命中: id={target_id}, display={group.get('display_name')}, path={group.get('path')}"
+            )
+            return group
+        page.wait_for_timeout(1000)
+    logger.warning(f"网页版群聊缓存未命中: {target_id}")
+    return None
+
+
+def _send_via_www_group_chat(page, target, logger):
+    """通过 www.douyin.com/chat 按群会话 ID 发送。支持 群名:群ID 写法。"""
+    target_id = _target_short_id(target)
+    visible_name = _target_visible_name(target)
+    if not target_id:
+        return False
+    logger.info(f"尝试使用网页版私信按群会话 ID 发送: {target_id}")
+    try:
+        page.goto(WWW_CHAT_URL, wait_until="domcontentloaded", timeout=config.get("browserTimeout", 120000))
+        page.wait_for_timeout(3000)
+        if _looks_www_chat_logged_out(page):
+            raise RuntimeError("网页版私信页面疑似未登录，请重新导出 web_storage_state。")
+        if not _wait_www_chat_ready(page, logger):
+            raise RuntimeError("网页版私信页面未加载完成或疑似未登录，请检查 web_storage_state。")
+
+        group = _wait_www_group_by_id(page, target_id, logger)
+        names = []
+        if group and group.get("display_name"):
+            names.append(group.get("display_name"))
+        if visible_name and visible_name != target_id:
+            names.append(visible_name)
+
+        for name in dict.fromkeys(names):
+            if _click_www_chat_by_visible_name(page, name, logger):
+                page.wait_for_timeout(2000)
+                return _type_and_send_www_chat(page, f"群:{target_id}", logger)
+
+        logger.warning(f"网页版群聊 ID 已解析但未找到可点击会话: {target_id}, names={names}")
+        dump_debug_snapshot(page, f"www-group-not-visible-{target_id}")
+        return False
+    except Exception as e:
+        logger.error(f"网页版群聊发送失败: {e}")
+        dump_debug_snapshot(page, f"www-group-send-failed-{target_id}")
+        return False
+
+
+def _send_via_www_group_name_chat(page, target, logger):
+    """通过 www.douyin.com/chat 按群名称发送。"""
+    group_name = _target_visible_name(target)
+    if not group_name:
+        return False
+    logger.info(f"尝试使用网页版私信按群名称发送: {group_name}")
+    try:
+        page.goto(WWW_CHAT_URL, wait_until="domcontentloaded", timeout=config.get("browserTimeout", 120000))
+        page.wait_for_timeout(3000)
+        if _looks_www_chat_logged_out(page):
+            raise RuntimeError("网页版私信页面疑似未登录，请重新导出 web_storage_state。")
+        if not _wait_www_chat_ready(page, logger):
+            raise RuntimeError("网页版私信页面未加载完成或疑似未登录，请检查 web_storage_state。")
+
+        if _click_www_chat_by_visible_name(page, group_name, logger):
+            page.wait_for_timeout(2000)
+            return _type_and_send_www_chat(page, f"群:{group_name}", logger)
+
+        dump_debug_snapshot(page, f"www-group-name-not-found-{group_name}")
+        return False
+    except Exception as e:
+        logger.error(f"网页版群名称发送失败: {e}")
+        dump_debug_snapshot(page, f"www-group-name-send-failed-{group_name}")
+        return False
+
+
 def _click_www_chat_search_result(page, target_id, logger):
     """搜索后点击 www 私信列表结果。优先点击包含目标文本的结果；否则仅在唯一可见结果时点击。"""
     target = str(target_id).strip()
@@ -669,6 +831,39 @@ def do_group_task(signer, username, groups):
     page = signer.page
     logger.info(f"开始群聊任务: {username}")
     failed = []
+    creator_groups = []
+
+    if config.get("preferWebChat", True):
+        for group_name in groups:
+            group_str = str(group_name).strip()
+            if not group_str:
+                continue
+            sent = False
+            for attempt in range(config.get("taskRetryTimes", 3)):
+                try:
+                    if groupMatchMode in ("id", "short_id", "conversation_id"):
+                        sent = _send_via_www_group_chat(page, group_str, logger)
+                    else:
+                        sent = _send_via_www_group_name_chat(page, group_str, logger)
+                    if sent:
+                        break
+                except Exception as e:
+                    logger.warning(f"网页版给群 {group_str} 发消息失败(尝试{attempt+1}): {e}")
+                    time.sleep(2)
+            if not sent:
+                fallback_name = _target_visible_name(group_str)
+                if fallback_name and fallback_name != _target_short_id(group_str):
+                    creator_groups.append(fallback_name)
+                elif groupMatchMode not in ("id", "short_id", "conversation_id"):
+                    creator_groups.append(group_str)
+                else:
+                    failed.append(group_str)
+
+        if not creator_groups:
+            logger.info(f"群聊任务完成: {username}")
+            return failed
+    else:
+        creator_groups = list(groups)
 
     # 重新导航到聊天页（私聊任务后可能跳到了 home）
     page.goto("https://creator.douyin.com/creator-micro/data/following/chat", timeout=30000)
@@ -693,10 +888,11 @@ def do_group_task(signer, username, groups):
     except Exception as e:
         logger.error(f"点击群消息 tab 失败: {e}")
         dump_debug_snapshot(page, f"group-tab-failed-{username}")
-        return list(groups)
+        failed.extend(list(creator_groups))
+        return failed
 
     # 逐个群发消息
-    for group_name in groups:
+    for group_name in creator_groups:
         group_str = str(group_name)
         sent = False
         for attempt in range(config.get("taskRetryTimes", 3)):
